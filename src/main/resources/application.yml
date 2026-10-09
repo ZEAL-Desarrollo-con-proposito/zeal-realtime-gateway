@@ -1,18 +1,46 @@
 server:
-  port: 8083
+  port: ${SERVER_PORT:8083}
+  shutdown: graceful
 
 spring:
   application:
     name: zeal-realtime-gateway
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  jackson:
+    default-property-inclusion: always
+    serialization:
+      write-dates-as-timestamps: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
 
 app:
-  jwt:
-    secret: ZealMVP2026ArchitectureSoftwareSecretKeyMinimum256Bits!!
+  time-zone: ${APP_TIME_ZONE:America/Bogota}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+  security:
+    jwt:
+      secret: ${JWT_SECRET:ZealMVP2026ArchitectureSoftwareSecretKeyMinimum256Bits!!}
+      issuer: ${JWT_ISSUER:zeal}
+  wellbeing:
+    # El gateway consulta al Wellbeing Service, con el token de cada persona, quién participa
+    # en una sala o conversación: la autorización vive en un solo lugar.
+    base-url: ${WELLBEING_BASE_URL:http://localhost:8081}
+    timeout: 2s
+    access-cache-ttl: 30s
+  notifications:
+    max-per-user: 100
 
 logging:
   level:
-    co.zeal: DEBUG
+    co.zeal: INFO
