@@ -26,16 +26,28 @@ public class WebConfig implements WebMvcConfigurer {
         resolvers.add(currentUserArgumentResolver);
     }
 
-    /** Lo usa Spring Security, así el preflight se responde antes de exigir el token. */
+    /**
+     * Lo usa Spring Security, así el preflight se responde antes de exigir el token. El filtro CORS
+     * de Security responde también {@code /ws/**}, y el cliente SockJS del navegador envía sus
+     * peticiones HTTP con {@code withCredentials}: esa ruta exige {@code Allow-Credentials: true}.
+     * Se registra primero porque gana el primer patrón que coincide.
+     */
     @Bean
     CorsConfigurationSource corsConfigurationSource(CorsProperties properties) {
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOriginPatterns(properties.allowedOrigins());
-        config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
-        config.setMaxAge(Duration.ofHours(1));
+        CorsConfiguration api = new CorsConfiguration();
+        api.setAllowedOriginPatterns(properties.allowedOrigins());
+        api.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        api.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        api.setMaxAge(Duration.ofHours(1));
+
+        CorsConfiguration sockJs = new CorsConfiguration(api);
+        sockJs.setAllowedMethods(List.of("GET", "POST", "OPTIONS"));
+        sockJs.setAllowedHeaders(List.of("*"));
+        sockJs.setAllowCredentials(true);
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", config);
+        source.registerCorsConfiguration("/ws/**", sockJs);
+        source.registerCorsConfiguration("/**", api);
         return source;
     }
 }

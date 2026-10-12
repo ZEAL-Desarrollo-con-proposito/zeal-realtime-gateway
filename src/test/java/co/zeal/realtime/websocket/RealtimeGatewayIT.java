@@ -25,6 +25,10 @@ import org.springframework.web.socket.sockjs.client.WebSocketTransport;
 import org.testcontainers.containers.GenericContainer;
 
 import java.lang.reflect.Type;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -75,6 +79,19 @@ class RealtimeGatewayIT {
     @AfterEach
     void disconnect() {
         sessions.stream().filter(StompSession::isConnected).forEach(StompSession::disconnect);
+    }
+
+    /** El cliente SockJS del navegador usa withCredentials: sin esta cabecera el navegador lo bloquea. */
+    @Test
+    void sockJsInfoAllowsCredentialsForTheFrontendOrigin() throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/ws/info"))
+                .header("Origin", "http://localhost:3000").build();
+
+        HttpResponse<String> response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(response.headers().firstValue("Access-Control-Allow-Origin")).hasValue("http://localhost:3000");
+        assertThat(response.headers().firstValue("Access-Control-Allow-Credentials")).hasValue("true");
     }
 
     @Test
