@@ -110,6 +110,35 @@ class RealtimeGatewayIT {
         assertThat(marianaInbox.poll(500, TimeUnit.MILLISECONDS)).isNull();
     }
 
+    /**
+     * REND-1 / OBS: el frontend mide la latencia de cada aviso con {@code emittedAt} (ISO-8601 UTC). Debe
+     * venir en los tópicos y en las colas privadas, y ser de hace instantes.
+     */
+    @Test
+    void everyStompMessageCarriesEmittedAt() throws Exception {
+        StompSession david = connect(Tokens.token("usr-empleado-001", "EMPLEADO", "Nexura S.A.S."));
+        BlockingQueue<Map<String, Object>> topic = subscribe(david, "/topic/proyectos/proyecto-7/cupos");
+        BlockingQueue<Map<String, Object>> queue = subscribe(david, "/user/queue/notificaciones");
+        Instant before = Instant.now().minusSeconds(1);
+
+        publish("zeal.marketplace.projects.spots", Map.of("projectId", "proyecto-7", "capacity", 10, "occupied", 3,
+                "available", 7));
+        publish("zeal.notifications", Map.of("eventId", "evento-emittedat-1", "userId", "usr-empleado-001",
+                "type", "RESERVA_CONFIRMADA", "title", "Tu cita quedó confirmada", "message", "Laura · martes",
+                "link", "/empleado/mis-citas"));
+
+        Map<String, Object> fromTopic = topic.poll(5, TimeUnit.SECONDS);
+        Map<String, Object> fromQueue = queue.poll(5, TimeUnit.SECONDS);
+        assertThat(fromTopic).as("mensaje del tópico").isNotNull();
+        assertThat(fromQueue).as("mensaje de la cola privada").isNotNull();
+        for (Map<String, Object> message : List.of(fromTopic, fromQueue)) {
+            assertThat(message).containsKey("emittedAt");
+            Instant emittedAt = Instant.parse((String) message.get("emittedAt"));
+            assertThat(emittedAt).isBetween(before, Instant.now().plusSeconds(1));
+        }
+        assertThat(topic.poll(200, TimeUnit.MILLISECONDS)).isNull();
+    }
+
     @Test
     void freedSlotOfferGoesToEachRecipientPrivately() throws Exception {
         StompSession mariana = connect(Tokens.token("usr-empleado-002", "EMPLEADO", "Nexura S.A.S."));
