@@ -21,12 +21,18 @@ public final class Tokens {
     }
 
     public static String token(String userId, String role, String organization) {
+        return token(userId, role, organization, "sesion-" + userId);
+    }
+
+    /** Token de una sesión ({@code sid}) concreta, como los que emite el Wellbeing Service (R2-13). */
+    public static String token(String userId, String role, String organization, String sessionId) {
         var key = new SecretKeySpec(SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
         var encoder = new NimbusJwtEncoder(new ImmutableSecret<>(key));
         Instant now = Instant.now();
         JwtClaimsSet claims = JwtClaimsSet.builder().issuer("zeal").subject(userId).issuedAt(now)
                 .expiresAt(now.plus(Duration.ofHours(1))).claim("role", role).claim("fullName", "Persona " + userId)
-                .claim("email", userId + "@zeal.co").claim("organization", organization).build();
+                .claim("email", userId + "@zeal.co").claim("organization", organization)
+                .claim("sid", sessionId).id(java.util.UUID.randomUUID().toString()).build();
         return encoder.encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
                 .getTokenValue();
     }

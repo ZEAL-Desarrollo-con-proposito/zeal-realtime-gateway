@@ -12,15 +12,33 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # MANT-1: resultado en 10 min o menos
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # SonarCloud necesita el historial para calcular el código nuevo
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
           cache: maven
-      # Pruebas unitarias y de integración (Testcontainers usa el Docker del runner).
-      - name: Pruebas y empaquetado
+      # Pruebas unitarias e integración (Testcontainers usa el Docker del runner), matriz de
+      # autorización (R2-10), reporte de JaCoCo y cobertura mínima del 80 % (jacoco:check).
+      - name: Pruebas, cobertura y empaquetado
         run: ./mvnw -B verify
+      - uses: actions/cache@v4
+        if: env.SONAR_TOKEN != ''
+        with:
+          path: ~/.sonar/cache
+          key: sonar-${{ runner.os }}
+      # R2-18: análisis en SonarCloud con el reporte de JaCoCo; espera el Quality Gate (A en código nuevo,
+      # cobertura de 80 % o más). Sin el secreto (forks, antes de la sesión cowork) el paso se omite.
+      - name: Análisis SonarCloud
+        if: env.SONAR_TOKEN != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./mvnw -B -DskipTests sonar:sonar -Dsonar.qualitygate.wait=true
       - name: Imagen Docker
         run: docker build -t ${{ github.event.repository.name }}:ci .

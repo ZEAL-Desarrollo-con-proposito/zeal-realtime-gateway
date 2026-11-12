@@ -1,5 +1,8 @@
 package co.zeal.realtime.wellbeing;
 
+import co.zeal.realtime.shared.web.CorrelationIdFilter;
+import org.slf4j.MDC;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
@@ -29,7 +32,15 @@ public class RestWellbeingClient implements WellbeingClient {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.timeout());
         requestFactory.setReadTimeout(properties.timeout());
-        this.http = builder.baseUrl(properties.baseUrl()).requestFactory(requestFactory).build();
+        this.http = builder.baseUrl(properties.baseUrl()).requestFactory(requestFactory)
+                .requestInterceptor((request, body, execution) -> { // R2-29: propaga el correlationId
+                    String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+                    if (correlationId != null) {
+                        request.getHeaders().set(CorrelationIdFilter.HEADER, correlationId);
+                    }
+                    return execution.execute(request, body);
+                })
+                .build();
     }
 
     @Override
@@ -59,11 +70,11 @@ public class RestWellbeingClient implements WellbeingClient {
                     .retrieve()
                     .body(JSON_OBJECT));
         } catch (HttpClientErrorException e) {
-            log.info("El Wellbeing Service rechazó un mensaje de chat ({}): {}", e.getStatusCode(),
-                    e.getResponseBodyAsString());
+            // R2-29: nunca el cuerpo (podría repetir el texto del mensaje).
+            log.info("El Wellbeing Service rechazó un mensaje de chat ({})", e.getStatusCode());
             return Optional.empty();
         } catch (RestClientException e) {
-            log.warn("No se pudo entregar un mensaje de chat al Wellbeing Service", e);
+            log.warn("No se pudo entregar un mensaje de chat al Wellbeing Service: {}", e.getClass().getSimpleName());
             return Optional.empty();
         }
     }

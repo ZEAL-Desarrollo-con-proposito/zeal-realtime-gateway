@@ -1,5 +1,6 @@
 package co.zeal.realtime.websocket;
 
+import co.zeal.realtime.support.Infrastructure;
 import co.zeal.realtime.support.Tokens;
 import co.zeal.realtime.wellbeing.WellbeingClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +23,6 @@ import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.messaging.WebSocketStompClient;
 import org.springframework.web.socket.sockjs.client.SockJsClient;
 import org.springframework.web.socket.sockjs.client.WebSocketTransport;
-import org.testcontainers.containers.GenericContainer;
 
 import java.lang.reflect.Type;
 import java.net.URI;
@@ -53,16 +53,9 @@ import static org.mockito.Mockito.when;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class RealtimeGatewayIT {
 
-    static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7-alpine").withExposedPorts(6379);
-
-    static {
-        REDIS.start();
-    }
-
     @DynamicPropertySource
-    static void redis(DynamicPropertyRegistry registry) {
-        registry.add("spring.data.redis.host", REDIS::getHost);
-        registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
+    static void infrastructure(DynamicPropertyRegistry registry) {
+        Infrastructure.register(registry);
     }
 
     @LocalServerPort

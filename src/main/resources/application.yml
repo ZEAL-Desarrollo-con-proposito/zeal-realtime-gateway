@@ -1,28 +1,51 @@
 server:
   port: ${SERVER_PORT:8083}
   shutdown: graceful
+  # Detrás de NGINX: la IP real del cliente sale de X-Forwarded-For (solo de proxies de redes privadas).
+  forward-headers-strategy: native
 
 spring:
+  lifecycle:
+    # Apagado ordenado: termina las peticiones en curso antes de detenerse (R2-3).
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
   application:
     name: zeal-realtime-gateway
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Obligatoria en el despliegue multinodo (Redis en el nodo de datos); vacía en local.
+      password: ${REDIS_PASSWORD:}
   jackson:
     default-property-inclusion: always
     serialization:
       write-dates-as-timestamps: false
 
 management:
+  # R2-30: histogramas para calcular p95 por endpoint en Prometheus; etiquetas comunes por servicio y réplica.
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+    tags:
+      service: ${spring.application.name}
+      replica: ${HOSTNAME:local}
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+      # R2-3: readiness = puede atender (sus dependencias responden): NGINX/Docker la sacan de la
+      # rotación si falla. liveness = el proceso está sano; no depende de terceros para que una caída
+      # de la base no provoque reinicios en cascada.
+      group:
+        readiness:
+          include: readinessState,redis,stompBroker
+        liveness:
+          include: livenessState
 
 app:
   time-zone: ${APP_TIME_ZONE:America/Bogota}
@@ -40,7 +63,60 @@ app:
     access-cache-ttl: 30s
   notifications:
     max-per-user: 100
+  # HU-DT-01 (ADR-04): RabbitMQ con el plugin STOMP como broker compartido por las réplicas.
+  broker:
+    relay:
+      host: ${RABBITMQ_HOST:localhost}
+      port: ${RABBITMQ_STOMP_PORT:61613}
+      virtual-host: ${RABBITMQ_VHOST:/}
+      client-login: ${RABBITMQ_CLIENT_LOGIN:zeal}
+      client-passcode: ${RABBITMQ_CLIENT_PASSCODE:zeal-dev-password}
+      system-login: ${RABBITMQ_SYSTEM_LOGIN:zeal}
+      system-passcode: ${RABBITMQ_SYSTEM_PASSCODE:zeal-dev-password}
+  # R2-32: telemetría del frontend (docs/contratos/telemetria.md).
+  telemetry:
+    max-body-bytes: 16384
+    requests-per-minute: ${TELEMETRY_REQUESTS_PER_MINUTE:30}
+    allowed-names:
+      - error_js
+      - error_api
+      - chunk_load
+      - ws_desconectado
+      - video_fallo
+      - login
+      - reservar_cita
+      - cancelar_cita
+      - chat_enviado
+      - postular
+      - inscribir_taller
+      - entrar_sala
+      - entrar_taller
+      - tomar_cupo
+      - carga_inicial
+      - notificacion_recibida
+      - mensaje_recibido
+      - api_respuesta
+  presence:
+    ttl: ${PRESENCE_TTL:30s}
+    sweep-interval: ${PRESENCE_SWEEP_INTERVAL:10s}
+  events:
+    # Ventana en la que una réplica reclama un evento de Redis para procesarlo una sola vez.
+    claim-window: ${EVENT_CLAIM_WINDOW:30s}
+  websocket:
+    threads:
+      inbound: ${STOMP_INBOUND_THREADS:8}
+      outbound: ${STOMP_OUTBOUND_THREADS:8}
 
 logging:
+  # R2-29: una línea JSON por evento (formato Logstash, nativo de Spring Boot) con el MDC (correlationId,
+  # userId), servicio y réplica. LOG_FORMAT=ecs|gelf|logstash; en desarrollo se puede sobrescribir
+  # LOGGING_STRUCTURED_FORMAT_CONSOLE para volver al formato de texto.
+  structured:
+    format:
+      console: ${LOG_FORMAT:logstash}
+    json:
+      add:
+        service: ${spring.application.name}
+        replica: ${HOSTNAME:local}
   level:
     co.zeal: INFO

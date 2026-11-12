@@ -19,7 +19,7 @@ import java.io.IOException;
 public class JsonSecurityErrorHandler implements AuthenticationEntryPoint, AccessDeniedHandler {
 
     static final String UNAUTHORIZED_MESSAGE = "Tu sesión no es válida. Vuelve a iniciar sesión.";
-    static final String FORBIDDEN_MESSAGE = "No tienes permiso para esta operación.";
+    static final String NOT_FOUND_MESSAGE = "El recurso solicitado no existe.";
 
     private final ApiErrorFactory errors;
     private final ObjectMapper objectMapper;
@@ -38,7 +38,7 @@ public class JsonSecurityErrorHandler implements AuthenticationEntryPoint, Acces
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
-        write(response, request, HttpStatus.FORBIDDEN, FORBIDDEN_MESSAGE);
+        write(response, request, HttpStatus.NOT_FOUND, NOT_FOUND_MESSAGE); // SEG-3: 404, no 403
     }
 
     private void write(HttpServletResponse response, HttpServletRequest request, HttpStatus status, String message)

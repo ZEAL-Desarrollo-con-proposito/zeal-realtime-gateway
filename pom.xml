@@ -20,6 +20,17 @@
         <byte-buddy.version>1.18.14</byte-buddy.version>
         <!-- Compatible con la API mínima de Docker 29 -->
         <testcontainers.version>1.21.4</testcontainers.version>
+        <!-- 6.x es la línea compatible con Spring Framework 6 / Boot 3 -->
+        <shedlock.version>6.10.0</shedlock.version>
+        <jacoco.version>0.8.16</jacoco.version>
+        <!-- R2-18 / R2-19 · SonarCloud (la organización y el token se configuran en cowork; ver docs/cowork). -->
+        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+        <sonar.organization>zeal-desarrollo-con-proposito</sonar.organization>
+        <sonar.projectKey>ZEAL-Desarrollo-con-proposito_zeal-realtime-gateway</sonar.projectKey>
+        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+        <!-- Exclusiones de cobertura justificadas en docs/evidencias/MANT.md: arranque de Spring Boot,
+             registros de propiedades y clases @Configuration sin lógica propia. -->
+        <sonar.coverage.exclusions>**/*Application.java,**/*Properties.java</sonar.coverage.exclusions>
     </properties>
     <dependencies>
         <dependency>
@@ -45,6 +56,27 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <!-- R2-30: /actuator/prometheus (solo red interna; NGINX no lo publica) -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+        <!-- Una sola réplica ejecuta cada tarea programada (barrido de presencia) -->
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-spring</artifactId>
+            <version>${shedlock.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.javacrumbs.shedlock</groupId>
+            <artifactId>shedlock-provider-redis-spring</artifactId>
+            <version>${shedlock.version}</version>
+        </dependency>
+        <!-- Cliente TCP del relay STOMP hacia RabbitMQ (HU-DT-01, ADR-04) -->
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty</artifactId>
         </dependency>
 
         <dependency>
@@ -73,6 +105,77 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+            <!-- R2-19 · Cobertura de pruebas unitarias e integración, fusionada en un solo reporte XML. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <configuration>
+                    <excludes>
+                        <exclude>**/*Application.class</exclude>
+                        <exclude>**/*Properties.class</exclude>
+                    </excludes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>agente-unitarias</id>
+                        <goals><goal>prepare-agent</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>agente-integracion</id>
+                        <goals><goal>prepare-agent-integration</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>fusionar</id>
+                        <phase>post-integration-test</phase>
+                        <goals><goal>merge</goal></goals>
+                        <configuration>
+                            <fileSets>
+                                <fileSet>
+                                    <directory>${project.build.directory}</directory>
+                                    <includes><include>jacoco*.exec</include></includes>
+                                    <excludes><exclude>jacoco-merged.exec</exclude></excludes>
+                                </fileSet>
+                            </fileSets>
+                            <destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <!-- MANT-1: el build falla si la cobertura de líneas baja del 80 %. -->
+                        <id>cobertura-minima</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>reporte</id>
+                        <phase>verify</phase>
+                        <goals><goal>report</goal></goals>
+                        <configuration>
+                            <dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.sonarsource.scanner.maven</groupId>
+                <artifactId>sonar-maven-plugin</artifactId>
+                <version>5.8.0.7211</version>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

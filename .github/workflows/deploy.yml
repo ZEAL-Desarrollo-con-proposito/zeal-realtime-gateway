@@ -1,0 +1,76 @@
+name: Deploy
+
+# R2-6 (ADR-12, ADR-13): cuando el CI de main termina en verde, construye la imagen, la publica en
+# GitHub Container Registry y la despliega por SSH en los dos nodos de servicios, UNA RÉPLICA A LA VEZ:
+# services-2 solo se toca si services-1 quedó lista (readiness). deploy-service.sh revierte y falla si no.
+#
+# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, BASTION_HOST,
+# SERVICES_1_HOST, SERVICES_2_HOST (IPs privadas; se llega por el nodo de borde como bastión).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  SERVICE: realtime
+  IMAGE: ghcr.io/${{ github.repository_owner }}/zeal-realtime-gateway
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: tag
+        run: echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construir y publicar
+        run: |
+          ref="$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')"
+          docker build -t "$ref:${{ steps.tag.outputs.tag }}" -t "$ref:latest" .
+          docker push "$ref:${{ steps.tag.outputs.tag }}"
+          docker push "$ref:latest"
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    strategy:
+      max-parallel: 1        # Una réplica a la vez
+      fail-fast: true        # Si services-1 falla, services-2 no se toca
+      matrix:
+        node: [SERVICES_1_HOST, SERVICES_2_HOST]
+    steps:
+      - name: Llave SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Desplegar en ${{ matrix.node }}
+        env:
+          BASTION: ${{ secrets.BASTION_HOST }}
+          TARGET: ${{ secrets[matrix.node] }}
+          TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          ssh -o BatchMode=yes -J "deploy@$BASTION" "deploy@$TARGET" \
+            "/opt/zeal/zeal-infra-compose/deploy/scripts/deploy-service.sh $SERVICE $TAG"

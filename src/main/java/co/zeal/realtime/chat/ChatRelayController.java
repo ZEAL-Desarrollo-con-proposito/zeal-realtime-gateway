@@ -1,5 +1,7 @@
 package co.zeal.realtime.chat;
 
+import co.zeal.realtime.metrics.DeliveryLatency;
+
 import co.zeal.realtime.wellbeing.ParticipantAccess;
 import co.zeal.realtime.wellbeing.WellbeingClient;
 import co.zeal.realtime.websocket.Destinations;
@@ -24,8 +26,11 @@ public class ChatRelayController {
     private final WellbeingClient wellbeing;
     private final ParticipantAccess access;
     private final RealtimeSender sender;
+    private final DeliveryLatency latency;
 
-    public ChatRelayController(WellbeingClient wellbeing, ParticipantAccess access, RealtimeSender sender) {
+    public ChatRelayController(WellbeingClient wellbeing, ParticipantAccess access, RealtimeSender sender,
+                               DeliveryLatency latency) {
+        this.latency = latency;
         this.wellbeing = wellbeing;
         this.access = access;
         this.sender = sender;
@@ -40,9 +45,11 @@ public class ChatRelayController {
         }
         access.conversation(principal, conversationId).ifPresent(conversation ->
                 wellbeing.sendChatMessage(principal.accessToken(), conversationId, outgoing.text())
-                        .ifPresent(message -> sender.toUsers(
-                                List.of(conversation.employeeId(), conversation.psychologistId()),
-                                Destinations.CHATS_QUEUE, Map.of("type", "NUEVO", "message", message))));
+                        .ifPresent(message -> {
+                            sender.toUsers(List.of(conversation.employeeId(), conversation.psychologistId()),
+                                    Destinations.CHATS_QUEUE, Map.of("type", "NUEVO", "message", message));
+                            latency.record("chat", String.valueOf(message.get("sentAt")));
+                        }));
     }
 
     /** Solo a la otra persona: quien escribe ya sabe que está escribiendo. */

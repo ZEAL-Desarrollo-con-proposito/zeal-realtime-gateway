@@ -1,6 +1,9 @@
 package co.zeal.realtime.websocket;
 
+import co.zeal.realtime.security.GatewaySecurityAudit;
 import co.zeal.realtime.shared.security.AuthenticatedUser;
+import co.zeal.realtime.shared.security.ZealClaims;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.messaging.Message;
@@ -26,9 +29,11 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
     private static final String BEARER = "Bearer ";
 
     private final JwtDecoder jwtDecoder;
+    private final GatewaySecurityAudit audit;
 
-    public StompAuthenticationInterceptor(JwtDecoder jwtDecoder) {
+    public StompAuthenticationInterceptor(JwtDecoder jwtDecoder, GatewaySecurityAudit audit) {
         this.jwtDecoder = jwtDecoder;
+        this.audit = audit;
     }
 
     @Override
@@ -39,15 +44,18 @@ public class StompAuthenticationInterceptor implements ChannelInterceptor {
         }
         String header = accessor.getFirstNativeHeader("Authorization");
         if (header == null || !header.startsWith(BEARER)) {
+            audit.publish("STOMP_CONNECT", "DENEGADO", null, accessor, "sin token");
             throw new BadCredentialsException("La conexión en tiempo real requiere un token");
         }
         String token = header.substring(BEARER.length()).trim();
         try {
-            AuthenticatedUser user = AuthenticatedUser.from(jwtDecoder.decode(token));
-            accessor.setUser(new StompPrincipal(user, token));
+            Jwt jwt = jwtDecoder.decode(token); // Incluye la lista negra (R2-13): un token revocado no conecta.
+            AuthenticatedUser user = AuthenticatedUser.from(jwt);
+            accessor.setUser(new StompPrincipal(user, token, jwt.getClaimAsString(ZealClaims.SESSION), jwt.getId()));
             return message;
         } catch (JwtException | IllegalArgumentException e) {
             log.debug("CONNECT rechazado: {}", e.getMessage());
+            audit.publish("STOMP_CONNECT", "DENEGADO", null, accessor, "token inválido, vencido o revocado");
             throw new BadCredentialsException("Token inválido o expirado", e);
         }
     }
