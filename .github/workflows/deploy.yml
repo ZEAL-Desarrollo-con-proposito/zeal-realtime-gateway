@@ -1,0 +1,72 @@
+name: Deploy
+
+# R2-6 (ADR-12, ADR-13): cuando el CI de main termina en verde, construye la imagen, la publica en
+# GitHub Container Registry y la despliega por SSH en la VM de este microservicio, UNA RÉPLICA A LA VEZ:
+# deploy-service.sh actualiza la réplica "a", espera su readiness y recién entonces la "b"; si alguna
+# no queda lista, vuelve a la versión anterior y el job falla.
+#
+# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, BASTION_HOST y
+# SERVICE_HOST (IP privada de la VM de este microservicio; se llega por la VM de borde como bastión).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  SERVICE: realtime
+  IMAGE: ghcr.io/${{ github.repository_owner }}/zeal-realtime-gateway
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - id: tag
+        run: echo "tag=$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construir y publicar
+        run: |
+          ref="$(echo "${IMAGE}" | tr '[:upper:]' '[:lower:]')"
+          docker build -t "$ref:${{ steps.tag.outputs.tag }}" -t "$ref:latest" .
+          docker push "$ref:${{ steps.tag.outputs.tag }}"
+          docker push "$ref:latest"
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Llave SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+      - name: Desplegar (réplica a, luego réplica b)
+        env:
+          BASTION: ${{ secrets.BASTION_HOST }}
+          TARGET: ${{ secrets.SERVICE_HOST }}
+          TAG: ${{ needs.publish.outputs.tag }}
+        run: |
+          ssh -o BatchMode=yes -J "deploy@$BASTION" "deploy@$TARGET" \
+            "/opt/zeal/zeal-infra-compose/deploy/scripts/deploy-service.sh $SERVICE $TAG"

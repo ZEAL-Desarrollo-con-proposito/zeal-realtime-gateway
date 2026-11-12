@@ -2,7 +2,11 @@ package co.zeal.realtime.shared.web;
 
 import co.zeal.realtime.shared.security.CurrentUserArgumentResolver;
 import org.springframework.context.annotation.Bean;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -19,6 +23,18 @@ public class WebConfig implements WebMvcConfigurer {
 
     public WebConfig(CurrentUserArgumentResolver currentUserArgumentResolver) {
         this.currentUserArgumentResolver = currentUserArgumentResolver;
+    }
+
+    /** R2-29: el id interno de quien llama en cada línea de log de la petición. */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new HandlerInterceptor() {
+            @Override
+            public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+                CorrelationIdFilter.tagCurrentUser();
+                return true;
+            }
+        });
     }
 
     @Override

@@ -1,6 +1,7 @@
 package co.zeal.realtime.websocket;
 
 import co.zeal.realtime.shared.security.Role;
+import co.zeal.realtime.security.GatewaySecurityAudit;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.simp.stomp.StompCommand;
@@ -20,6 +21,12 @@ import java.util.regex.Pattern;
 @Component
 public class StompSubscriptionGuard implements ChannelInterceptor {
 
+    private final GatewaySecurityAudit audit;
+
+    public StompSubscriptionGuard(GatewaySecurityAudit audit) {
+        this.audit = audit;
+    }
+
     private static final Pattern USER_QUEUE = Pattern.compile("^/user/queue/[a-z-]+$");
     private static final Pattern SPOTS_TOPIC = Pattern.compile("^/topic/(proyectos|talleres)/[^/]+/cupos$");
     private static final Pattern ORGANIZATION_TOPIC =
@@ -35,11 +42,14 @@ public class StompSubscriptionGuard implements ChannelInterceptor {
         }
         StompCommand command = accessor.getCommand();
         if (command == StompCommand.SUBSCRIBE) {
-            requireAllowed(isSubscriptionAllowed(principalOf(accessor), accessor.getDestination()));
+            StompPrincipal principal = principalOf(accessor);
+            requireAllowed(isSubscriptionAllowed(principal, accessor.getDestination()), principal, accessor,
+                    "STOMP_SUSCRIPCION");
         } else if (command == StompCommand.SEND) {
-            principalOf(accessor);
+            StompPrincipal principal = principalOf(accessor);
             String destination = accessor.getDestination();
-            requireAllowed(destination != null && APP_DESTINATION.matcher(destination).matches());
+            requireAllowed(destination != null && APP_DESTINATION.matcher(destination).matches(), principal, accessor,
+                    "STOMP_ENVIO");
         }
         return message;
     }
@@ -70,8 +80,10 @@ public class StompSubscriptionGuard implements ChannelInterceptor {
         throw new AccessDeniedException("Sesión en tiempo real sin autenticar");
     }
 
-    private static void requireAllowed(boolean allowed) {
+    /** R2-9: el intento de escuchar o escribir en un canal ajeno se rechaza (cierra la sesión) y se audita. */
+    private void requireAllowed(boolean allowed, StompPrincipal principal, StompHeaderAccessor accessor, String event) {
         if (!allowed) {
+            audit.publish(event, "DENEGADO", principal.getName(), accessor, "destino " + accessor.getDestination());
             throw new AccessDeniedException("No tienes permiso para este canal");
         }
     }
