@@ -1,11 +1,12 @@
 name: Deploy
 
 # R2-6 (ADR-12, ADR-13): cuando el CI de main termina en verde, construye la imagen, la publica en
-# GitHub Container Registry y la despliega por SSH en los dos nodos de servicios, UNA RÉPLICA A LA VEZ:
-# services-2 solo se toca si services-1 quedó lista (readiness). deploy-service.sh revierte y falla si no.
+# GitHub Container Registry y la despliega por SSH en la VM de este microservicio, UNA RÉPLICA A LA VEZ:
+# deploy-service.sh actualiza la réplica "a", espera su readiness y recién entonces la "b"; si alguna
+# no queda lista, vuelve a la versión anterior y el job falla.
 #
-# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, BASTION_HOST,
-# SERVICES_1_HOST, SERVICES_2_HOST (IPs privadas; se llega por el nodo de borde como bastión).
+# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, BASTION_HOST y
+# SERVICE_HOST (IP privada de la VM de este microservicio; se llega por la VM de borde como bastión).
 on:
   workflow_run:
     workflows: [CI]
@@ -52,11 +53,6 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     environment: production
-    strategy:
-      max-parallel: 1        # Una réplica a la vez
-      fail-fast: true        # Si services-1 falla, services-2 no se toca
-      matrix:
-        node: [SERVICES_1_HOST, SERVICES_2_HOST]
     steps:
       - name: Llave SSH
         env:
@@ -66,10 +62,10 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Desplegar en ${{ matrix.node }}
+      - name: Desplegar (réplica a, luego réplica b)
         env:
           BASTION: ${{ secrets.BASTION_HOST }}
-          TARGET: ${{ secrets[matrix.node] }}
+          TARGET: ${{ secrets.SERVICE_HOST }}
           TAG: ${{ needs.publish.outputs.tag }}
         run: |
           ssh -o BatchMode=yes -J "deploy@$BASTION" "deploy@$TARGET" \
