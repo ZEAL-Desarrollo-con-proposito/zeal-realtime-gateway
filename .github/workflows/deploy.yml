@@ -1,12 +1,14 @@
 name: Deploy
 
 # R2-6 (ADR-12, ADR-13): cuando el CI de main termina en verde, construye la imagen, la publica en
-# GitHub Container Registry y la despliega por SSH en la VM de este microservicio, UNA RÉPLICA A LA VEZ:
-# deploy-service.sh actualiza la réplica "a", espera su readiness y recién entonces la "b"; si alguna
-# no queda lista, vuelve a la versión anterior y el job falla.
+# GitHub Container Registry y la despliega por SSH en las DOS VMs de este microservicio, una a la vez:
+# primero la VM 1 y, solo si quedó lista (readiness), la VM 2. Mientras una se actualiza, la otra atiende
+# detrás del balanceador. deploy-service.sh revierte y falla si una versión no queda lista.
 #
-# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, BASTION_HOST y
-# SERVICE_HOST (IP privada de la VM de este microservicio; se llega por la VM de borde como bastión).
+# Secretos del entorno "production" (cowork): DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, SERVICE_1_HOST y
+# SERVICE_2_HOST (IP de cada VM del microservicio). Con VMs en cuentas distintas se llega directo por su IP
+# pública, con una regla de SSH que admita el rango de GitHub Actions (ver runbook) o un runner propio.
+
 on:
   workflow_run:
     workflows: [CI]
@@ -53,6 +55,11 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     environment: production
+    strategy:
+      max-parallel: 1        # Una VM a la vez
+      fail-fast: true        # Si la VM 1 falla, la VM 2 no se toca
+      matrix:
+        vm: [SERVICE_1_HOST, SERVICE_2_HOST]
     steps:
       - name: Llave SSH
         env:
@@ -62,11 +69,10 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-      - name: Desplegar (réplica a, luego réplica b)
+      - name: Desplegar en ${{ matrix.vm }}
         env:
-          BASTION: ${{ secrets.BASTION_HOST }}
-          TARGET: ${{ secrets.SERVICE_HOST }}
+          TARGET: ${{ secrets[matrix.vm] }}
           TAG: ${{ needs.publish.outputs.tag }}
         run: |
-          ssh -o BatchMode=yes -J "deploy@$BASTION" "deploy@$TARGET" \
+          ssh -o BatchMode=yes "deploy@$TARGET" \
             "/opt/zeal/zeal-infra-compose/deploy/scripts/deploy-service.sh $SERVICE $TAG"
