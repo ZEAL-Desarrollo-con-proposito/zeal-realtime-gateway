@@ -28,6 +28,9 @@ jobs:
       # autorización (R2-10), reporte de JaCoCo y cobertura mínima del 80 % (jacoco:check).
       - name: Pruebas, cobertura y empaquetado
         run: ./mvnw -B verify
+      - name: Aviso — SonarCloud omitido
+        if: env.SONAR_TOKEN == ''
+        run: echo "::warning title=SonarCloud omitido::El secreto SONAR_TOKEN no llega a este job. Sin él no se sube la cobertura de JaCoCo ni se evalúa el Quality Gate. Configúralo en Settings > Secrets and variables > Actions (secreto de repositorio, nombre exacto SONAR_TOKEN)."
       - uses: actions/cache@v4
         if: env.SONAR_TOKEN != ''
         with:
