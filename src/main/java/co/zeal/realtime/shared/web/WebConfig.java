@@ -53,7 +53,7 @@ public class WebConfig implements WebMvcConfigurer {
         CorsConfiguration api = new CorsConfiguration();
         api.setAllowedOriginPatterns(properties.allowedOrigins());
         api.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        api.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        api.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Request-Id"));
         api.setMaxAge(Duration.ofHours(1));
 
         CorsConfiguration sockJs = new CorsConfiguration(api);
