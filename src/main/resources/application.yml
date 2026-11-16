@@ -96,6 +96,8 @@ app:
       - notificacion_recibida
       - mensaje_recibido
       - api_respuesta
+      - vista          # uso: pantalla vista (PR #47 del front)
+      - interaccion    # latencia: tiempo de interacción de una sesión, 0-120 000 ms
   presence:
     ttl: ${PRESENCE_TTL:30s}
     sweep-interval: ${PRESENCE_SWEEP_INTERVAL:10s}

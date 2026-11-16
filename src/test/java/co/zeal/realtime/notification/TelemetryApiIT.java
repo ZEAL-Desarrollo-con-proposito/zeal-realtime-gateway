@@ -47,7 +47,9 @@ class TelemetryApiIT {
                   {"type":"error","name":"chunk_load","route":"/empleado/mis-citas"},
                   {"type":"uso","name":"reservar_cita"},
                   {"type":"uso","name":"nombre_inventado_por_alguien"},
-                  {"type":"latencia","name":"notificacion_recibida","valueMs":180}
+                  {"type":"latencia","name":"notificacion_recibida","valueMs":180},
+                  {"type":"uso","name":"vista","route":"/empleado/mis-citas"},
+                  {"type":"latencia","name":"interaccion","valueMs":120000}
                 ]}""";
 
         assertThat(post(token(), body).statusCode()).isEqualTo(202);
@@ -58,6 +60,10 @@ class TelemetryApiIT {
                 .as("nombres fuera de la lista no crean series nuevas").isEqualTo(1);
         assertThat(meters.find("zeal.frontend.latency").tag("name", "notificacion_recibida").timer()
                 .totalTime(TimeUnit.MILLISECONDS)).isEqualTo(180);
+        assertThat(meters.find("zeal.frontend.usage").tag("name", "vista").counter().count())
+                .as("«vista» es un nombre reconocido, no cae en «otro»").isEqualTo(1);
+        assertThat(meters.find("zeal.frontend.latency").tag("name", "interaccion").timer()
+                .totalTime(TimeUnit.MILLISECONDS)).isEqualTo(120_000);
     }
 
     @Test
